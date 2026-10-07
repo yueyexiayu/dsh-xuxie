@@ -1,0 +1,19 @@
+{
+  "name": "xuxie",
+  "version": "0.2.0",
+  "private": true,
+  "description": "DSH plugin: recover empty responses through official retry and bound reasoning-only continuation.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
