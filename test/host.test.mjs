@@ -51,9 +51,12 @@ async function harness(t, entries, options = {}) {
   ctx.on("session/event", (owner, event) => events.push({ owner, event }));
   ctx.on("agent/error", (payload) => errors.push(payload));
   if (options.retryPolicy) await ctx.plugin(retry);
-  const plugin = { inject, apply: async (inner) => apply(inner, { providers: ["mock"], ...options.config }) };
   let fiber;
-  const mount = async () => { fiber = await ctx.plugin(plugin); return fiber; };
+  const mount = async (config = options.config) => {
+    const plugin = { inject, apply: async (inner) => apply(inner, { providers: ["mock"], ...config }) };
+    fiber = await ctx.plugin(plugin);
+    return fiber;
+  };
   if (options.beforeMount) options.beforeMount(ctx);
   if (!options.noMount) await mount();
   async function create(meta = {}, agentOptions = {}, seed) {
@@ -353,6 +356,165 @@ test("resuming a stored old session applies xuxie to its new turn", async (t) =>
   assert.equal(h.adapter.requests.length, 3);
   assert.equal(h.steers(handle.agent).length, 1);
   assert.equal(h.end(handle.agent).kind, "completed");
+});
+
+for (const resume of [false, true]) {
+  test(`candidate lifecycle: cancellation ${resume ? "and persisted resume" : "with a live Agent"} drops the old reminder before a silent turn`, async (t) => {
+    const h = await harness(t, [reasoning(), empty(), reasoning(), answer()]);
+    const id = session.SessionId(`xuxie-pending-resume-${++serial}`);
+    const old = await h.ctx.agents.create({ sessionId: id, agentOptions: { provider: "mock", model: "test-model" } });
+    let cancelled = false;
+    h.ctx.on("agent/turn-stopping", ({ agent }) => {
+      if (cancelled) return;
+      cancelled = true;
+      assert.equal(agent.inbox.nextStep.filter((message) => message.source.kind === "plugin:xuxie").length, 1);
+      // The official session/cancel command retains inbox work.
+      agent.cancel({ kind: "user" }, { keepInbox: true });
+    });
+    let agent = old.agent;
+    await h.send(agent);
+    assert.equal(h.end(agent).kind, "aborted");
+    assert.equal(h.adapter.requests.length, 1);
+    assert.equal(h.steers(agent).length, 0);
+    if (resume) {
+      const header = agent.session.header;
+      const persisted = h.ownEvents(agent);
+      await old.dispose();
+      h.ctx.provide("sessionPersistence", { open: async () => ({
+        header, inheritedEventCount: 0,
+        read: async () => ({ events: [...persisted], eventState: "shared-frozen" }),
+        append: async (events) => { persisted.push(...events); },
+        close: async () => {},
+      }) });
+      agent = (await h.ctx.agents.resume({ resumeSessionId: id, agentOptions: { provider: "mock", model: "test-model" } })).agent;
+    }
+    await h.send(agent, "Wait silently. <!-- xuxie:off -->");
+    assert.equal(h.adapter.requests.length, 2);
+    assert.ok(!h.adapter.requests[1].messages.some((message) => message.source.kind === "plugin:xuxie"));
+    assert.equal(h.steers(agent).length, 0);
+    assert.equal(h.end(agent).kind, "completed");
+    assert.equal(h.ctx.sessionProjections.stateOf(agent.session, "xuxie/turn").optOut, true);
+    assert.equal(h.ctx.sessionProjections.stateOf(agent.session, "xuxie/turn").steers, 0);
+    assert.equal(agent.inbox.nextStep.length, 0);
+    // Cleaning a stale reminder must not disable legitimate later continuation.
+    await h.send(agent, "Now answer a new question.");
+    assert.equal(h.adapter.requests.length, 4);
+    assert.equal(h.steers(agent).length, 1);
+    assert.equal(h.end(agent).kind, "completed");
+  });
+}
+
+test("candidate lifecycle: waking only a cancelled reminder does not call the model for an orphan runtime context", async (t) => {
+  const h = await harness(t, [reasoning(), answer()]);
+  let text = "Initial runtime policy.";
+  h.ctx.on("system-prompt/assemble", async (_assembly, _context, next) => ({ ...await next(), contexts: [{ name: "test:policy", text, order: 0 }] }));
+  let cancelled = false;
+  h.ctx.on("agent/turn-stopping", ({ agent }) => {
+    if (cancelled) return;
+    cancelled = true;
+    text = "Updated runtime policy after cancellation.";
+    agent.cancel({ kind: "user" }, { keepInbox: true, wakePending: true });
+  });
+  const agent = await h.create();
+  await h.send(agent);
+  await agent.whenIdle();
+  assert.equal(h.ownEvents(agent).filter((event) => event.type === "turn/start").length, 2);
+  assert.equal(h.adapter.requests.length, 1);
+  assert.equal(h.steers(agent).length, 0);
+  assert.equal(agent.inbox.nextStep.length, 0);
+  assert.equal(h.end(agent).kind, "completed");
+  await h.send(agent, "Now answer with the current runtime policy.");
+  assert.equal(h.adapter.requests.length, 2);
+  const contexts = h.adapter.requests[1].messages.filter((message) => message.source.kind === "runtime-context");
+  assert.ok(contexts.some((message) => message.content.some((block) => block.type === "text" && block.text.includes("Updated runtime policy after cancellation."))));
+  assert.ok(!h.adapter.requests[1].messages.some((message) => message.source.kind === "plugin:xuxie"));
+  assert.equal(h.end(agent).kind, "completed");
+});
+
+for (const quota of [0, 2]) {
+  test(`candidate lifecycle: a same-turn reload still enforces quota ${quota}`, async (t) => {
+    const h = await harness(t, [reasoning(), answer()], { config: { maxSteersPerTurn: quota } });
+    let reloaded = false;
+    h.ctx.on("agent/turn-stopping", async () => {
+      if (reloaded) return;
+      reloaded = true;
+      await h.fiber.dispose();
+      await h.mount();
+    });
+    const agent = await h.create();
+    await h.send(agent);
+    assert.equal(h.adapter.requests.length, quota === 0 ? 1 : 2);
+    assert.equal(h.steers(agent).length, quota === 0 ? 0 : 1);
+    assert.equal(h.end(agent).kind, quota === 0 ? "error" : "completed");
+    if (quota === 0) assert.equal(h.end(agent).error.code, "XUXIE_NO_ANSWER");
+    assert.equal(agent.inbox.nextStep.length, 0);
+  });
+}
+
+for (const config of [
+  { enabled: false },
+  { providers: ["other"] },
+  { models: ["different-model"] },
+]) {
+  test(`candidate lifecycle: reloading with ${JSON.stringify(config)} removes a now-ineligible reminder`, async (t) => {
+    const h = await harness(t, [reasoning(), reasoning()]);
+    let reloaded = false;
+    h.ctx.on("agent/turn-stopping", async () => {
+      if (reloaded) return;
+      reloaded = true;
+      await h.fiber.dispose();
+      await h.mount(config);
+    });
+    const agent = await h.create();
+    await h.send(agent);
+    assert.equal(h.adapter.requests.length, 1);
+    assert.equal(h.steers(agent).length, 0);
+    assert.equal(h.end(agent).kind, "completed");
+    assert.equal(agent.inbox.nextStep.length, 0);
+    await h.send(agent, "Another question while the changed configuration remains active.");
+    assert.equal(h.adapter.requests.length, 2);
+    assert.equal(h.steers(agent).length, 0);
+    assert.equal(h.end(agent).kind, "completed");
+  });
+}
+
+test("candidate lifecycle: a reloaded candidate yields to an independent Stop hook even at zero quota", async (t) => {
+  const h = await harness(t, [reasoning(), answer()], { config: { maxSteersPerTurn: 0 } });
+  let once = false;
+  h.ctx.on("agent/turn-stopping", async ({ agent }) => {
+    if (once) return;
+    once = true;
+    await h.fiber.dispose();
+    await h.mount();
+    agent.steer(llm.createUserMessage({ content: [{ type: "text", text: "Independent work remains." }], source: { kind: "plugin:test-hook" } }));
+  });
+  const agent = await h.create();
+  await h.send(agent);
+  assert.equal(h.adapter.requests.length, 2);
+  assert.equal(h.steers(agent).length, 0);
+  assert.ok(h.adapter.requests[1].messages.some((message) => message.source.kind === "plugin:test-hook"));
+  assert.ok(!h.adapter.requests[1].messages.some((message) => message.source.kind === "plugin:xuxie"));
+  assert.equal(h.end(agent).kind, "completed");
+});
+
+test("candidate lifecycle: duplicate plugin reminders after reload enter the model only once", async (t) => {
+  const h = await harness(t, [reasoning(), answer()], { config: { maxSteersPerTurn: 1 } });
+  let once = false;
+  h.ctx.on("agent/turn-stopping", async ({ agent }) => {
+    if (once) return;
+    once = true;
+    await h.fiber.dispose();
+    await h.mount();
+    const candidate = agent.inbox.nextStep.find((message) => message.source.kind === "plugin:xuxie");
+    assert.ok(candidate);
+    agent.steer(llm.createUserMessage({ content: candidate.content, source: candidate.source }));
+  });
+  const agent = await h.create();
+  await h.send(agent);
+  assert.equal(h.adapter.requests.length, 2);
+  assert.equal(h.adapter.requests[1].messages.filter((message) => message.source.kind === "plugin:xuxie").length, 1);
+  assert.equal(h.steers(agent).length, 1);
+  assert.equal(h.end(agent).kind, "completed");
 });
 
 const retryPolicy = { mode: "normal", maxRetries: 1, retryableCodes: ["EMPTY_RESPONSE"], backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 } };

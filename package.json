@@ -1,6 +1,6 @@
 {
   "name": "xuxie",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "DSH plugin: recover empty responses through official retry and bound reasoning-only continuation.",
   "type": "module",
