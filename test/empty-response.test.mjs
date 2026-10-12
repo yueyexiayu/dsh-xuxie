@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import os from "node:os";
+import { pathToFileURL } from "node:url";
 import { installEmptyResponseGuard } from "../lib/empty-response.js";
 import { hostModules } from "./host-runtime.mjs";
 
@@ -37,7 +40,7 @@ async function guard(chunks, { accepted = true, agent = {}, missingAgent = false
 }
 
 test("blank text and reasoning become EMPTY_RESPONSE without mutating chunks or losing usage", async () => {
-  for (const content of [[], [{ type: "text", text: "" }], [
+  for (const content of [[{ type: "text", text: "" }], [
     { type: "reasoning", text: " \n" }, { type: "text", text: "\t" },
   ]]) {
     const chunks = response(content);
@@ -49,6 +52,41 @@ test("blank text and reasoning become EMPTY_RESPONSE without mutating chunks or 
     assert.equal("replayState" in result.at(-1), false);
     assert.equal(chunks.at(-1).reason.kind, "stop");
     assert.equal(chunks.at(-1).replayState.response, "successful-provider-cursor");
+  }
+});
+
+test("the actual official pi-ai adapter owns zero-block errors; only whitespace stop needs xuxie", async () => {
+  const entry = process.env.DSH_OFFICIAL_ROOT
+    ? path.join(process.env.DSH_OFFICIAL_ROOT, "node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js")
+    : path.join(process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents/dsh"), "packages/llm/llm-pi-ai/lib/index.js");
+  const { PiAiAdapter } = await import(pathToFileURL(entry).href);
+  for (const content of [[], [{ type: "text", text: " " }]]) {
+    const model = { id: "fixture", provider: "mock", api: "openai-completions", input: ["text"], contextWindow: 1000 };
+    const profile = { modelErrors: new Map(), piProvider: {}, headers: {}, streamIdleTimeoutMs: 1000 };
+    const snapshot = { profiles: new Map([["mock", profile]]), models: {
+      getModel: () => model,
+      async *streamSimple() {
+        if (content.length) yield { type: "text_end", contentIndex: 0, content: " " };
+        yield { type: "done", message: { role: "assistant", model: "fixture", provider: "mock", api: "openai-completions", content,
+          stopReason: "stop", usage: { input: 2, output: 0, totalTokens: 2, cacheRead: 0, cacheWrite: 0 } } };
+      },
+    } };
+    const adapter = new PiAiAdapter({ resolveApiKey: async () => undefined });
+    const chunks = [];
+    for await (const chunk of adapter.streamWithSnapshot({ provider: "mock", model: "fixture", messages: [], signal: new AbortController().signal }, snapshot)) chunks.push(chunk);
+    if (!content.length) {
+      assert.equal(chunks.at(-1).reason.failure.code, "EMPTY_RESPONSE");
+      assert.deepEqual((await guard(chunks)).result, chunks);
+    } else {
+      assert.equal(chunks.at(-1).reason.kind, "stop");
+      assert.equal((await guard(chunks)).result.at(-1).reason.failure.code, "EMPTY_RESPONSE");
+    }
+  }
+});
+
+test("zero-block output and official EMPTY_RESPONSE are untouched by the incremental whitespace guard", async () => {
+  for (const chunks of [response(), response([], { kind: "error", failure: { code: "EMPTY_RESPONSE", message: "official empty response" } })]) {
+    assert.deepEqual((await guard(chunks)).result, chunks);
   }
 });
 
@@ -85,7 +123,7 @@ test("failure, cancellation, tool-calls, truncation, and an aborted signal retai
 });
 
 test("only accepted conversational agents are guarded and route filters receive the actual request", async () => {
-  const chunks = response();
+  const chunks = response([{ type: "text", text: " " }]);
   const agent = {};
   const normal = await guard(chunks, { agent });
   assert.equal(normal.selection.candidate, agent);

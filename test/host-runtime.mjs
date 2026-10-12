@@ -7,7 +7,13 @@ let loaded;
 /** Load the existing Host build; missing dependencies fail rather than silently skipping acceptance. */
 export function hostModules() {
   loaded ??= (async () => {
+    const packageRoot = process.env.DSH_OFFICIAL_ROOT;
     const root = process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents", "dsh");
+    const packages = {
+      cordis: "cordis", llm: "dsh-llm", session: "dsh-session", projections: "dsh-session-projection",
+      systemPrompt: "dsh-system-prompt", tools: "dsh-tools", agents: "dsh-agent", agentLoop: "dsh-agent-loop",
+      retry: "dsh-llm-retry", loader: "cordis-plugin-loader",
+    };
     const directories = {
       cordis: "vendor/cordis", llm: "packages/llm/llm", session: "packages/core/session",
       projections: "packages/session/session-projection", systemPrompt: "packages/core/system-prompt",
@@ -15,7 +21,7 @@ export function hostModules() {
       retry: "packages/llm/llm-retry", loader: "vendor/loader",
     };
     const entries = await Promise.all(Object.entries(directories).map(async ([name, directory]) => {
-      const base = path.join(root, directory);
+      const base = packageRoot ? path.join(packageRoot, "node_modules/@deepseek-ai", packages[name]) : path.join(root, directory);
       const manifest = JSON.parse(await readFile(path.join(base, "package.json"), "utf8"));
       const target = manifest.module || manifest.main;
       if (!target) throw new Error(`DSH Host ${name} has no runtime entry`);

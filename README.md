@@ -4,7 +4,7 @@ DSH 插件：修复正常结束却没有答案的两类输出。真正的空输�
 
 ## 行为与边界
 
-- **空输出**：官方 `llm/stream` 中使用官方 `BlockAssembler`，把正常 `stop` 且所有正文／思考块为空或空白的输出转换成 `EMPTY_RESPONSE`。官方 `llm-retry` 按 provider 的重试策略处理；重试未启用、禁用此错误或耗尽时，明确报错。保留用量；失败响应不携带成功的 replay state。
+- **空输出分工**：官方 0.2.1-alpha.2 的 pi-ai adapter 已把零内容块的正常 `stop` 转为 `EMPTY_RESPONSE`，xuxie 不重复转换零块输出，也不改写官方错误。仅当存在一个或多个正文／思考块且全部为空或空白、仍为正常 `stop` 时，才使用官方 `BlockAssembler` 补充 `EMPTY_RESPONSE`。官方 `llm-retry` 按 provider 的重试策略处理；重试未启用、禁用此错误或耗尽时，明确报错。保留用量；本插件转换的失败响应不携带成功 replay state。
 - **只有思考**：`agent/turn-stopping` 放入候选提醒；`agent/pre-step` 在其他停止钩子和下游 middleware 处理后决定是否保留。已有其他继续输入时让其优先，移除自己的候选，不消耗续写次数。
 - **续写耗尽**：仍只有思考时记录 `turn/end.reason.kind: error`，错误码 `XUXIE_NO_ANSWER`，并通过官方 `agent/error` 显示失败；不再以正常完成结束。此判定不会抢在后置 Stop hook 之前阻止它接管。
 - **已有回答**：默认不重复补写本轮之前已经给出的正常正文或附件。带 tool-call 的文字视为工具前说明，仍允许后续只有思考时补答。
@@ -51,11 +51,13 @@ DSH 插件：修复正常结束却没有答案的两类输出。真正的空输�
 
 ## 开发与验证
 
-测试复用已有 DSH checkout 的当前构建文件，默认 `~/Documents/dsh`，可用 `DSH_TEST_ROOT` 指定。缺失构建或依赖会失败，不会静默跳过 Host 验收。模型和持久化使用内存 fixture，不调用在线模型、不读真实用户会话。
+测试优先使用 `DSH_OFFICIAL_ROOT` 指定的只读发行目录（含 `node_modules/@deepseek-ai/*`）。未设置时复用已有 DSH checkout 的当前构建文件，默认 `~/Documents/dsh`，可用 `DSH_TEST_ROOT` 指定。缺失构建或依赖会失败，不会静默跳过 Host 验收。模型和持久化使用内存 fixture，不调用在线模型、不读真实用户会话。另直接运行官方 `PiAiAdapter.streamWithSnapshot()` 与伪造上游流，证明零块已由官方处理、空白块才需要增量保护；Host 集成覆盖配额 0/2、取消、已有答案、子代理排除、持久化恢复与同轮重载。
 
 ```bash
 node --check lib/index.js
 node --check lib/detect.js
 node --check lib/empty-response.js
 node --test test/*.test.mjs
+# 验证官方发行版，不使用旧 checkout：
+DSH_OFFICIAL_ROOT=/path/to/extracted-runtime node --test test/*.test.mjs
 ```
