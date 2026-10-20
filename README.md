@@ -41,6 +41,10 @@ DSH 插件：修复正常结束却没有答案的两类输出。真正的空输�
 
 桌面端更新后必须完全退出 DeepSeek Harness（macOS：⌘Q）再打开，刷新网页不会重新加载 Host 插件。新会话和恢复的旧会话的后续轮次都生效；不追溯补写已结束的历史输出。测试中的插件重载用于验证 Host 生命周期边界，不代表桌面端会自动热更新。
 
+## 0.2.2 测试路径维护
+
+默认测试依赖改为现用的 `~/Documents/dsh-official-0.2.1-alpha.4`，解除对已淘汰 alpha.2 checkout 的依赖；保留 `DSH_OFFICIAL_ROOT` 和 `DSH_TEST_ROOT` 覆盖。本次不改 Host 运行逻辑，不需要为测试路径变更重启桌面端。
+
 ## 0.2.1 修复
 
 修复取消保留队列、会话恢复和候选窗口重载时旧提醒绕过资格／配额校验的问题；配置关闭时仍清理遗留提醒；合并重复候选并避免仅由过期提醒附带的 runtime context 触发请求。澄清静默标记不关闭官方 adapter 的原生空响应错误与重试。
@@ -51,7 +55,7 @@ DSH 插件：修复正常结束却没有答案的两类输出。真正的空输�
 
 ## 开发与验证
 
-测试优先使用 `DSH_OFFICIAL_ROOT` 指定的只读发行目录（含 `node_modules/@deepseek-ai/*`）。未设置时复用已有 DSH checkout 的当前构建文件，默认 `~/Documents/dsh`，可用 `DSH_TEST_ROOT` 指定。缺失构建或依赖会失败，不会静默跳过 Host 验收。模型和持久化使用内存 fixture，不调用在线模型、不读真实用户会话。另直接运行官方 `PiAiAdapter.streamWithSnapshot()` 与伪造上游流，证明零块已由官方处理、空白块才需要增量保护；Host 集成覆盖配额 0/2、取消、已有答案、子代理排除、持久化恢复与同轮重载。
+测试优先使用 `DSH_OFFICIAL_ROOT` 指定的只读发行目录（含 `node_modules/@deepseek-ai/*`）。未设置时复用现用 DSH checkout 的当前构建文件，默认 `~/Documents/dsh-official-0.2.1-alpha.4`，可用 `DSH_TEST_ROOT` 指定。缺失构建或依赖会失败，不会静默跳过 Host 验收。模型和持久化使用内存 fixture，不调用在线模型、不读真实用户会话。另直接运行官方 `PiAiAdapter.streamWithSnapshot()` 与伪造上游流，证明零块已由官方处理、空白块才需要增量保护；Host 集成覆盖配额 0/2、取消、已有答案、子代理排除、持久化恢复与同轮重载。
 
 ```bash
 node --check lib/index.js

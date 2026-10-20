@@ -58,7 +58,7 @@ test("blank text and reasoning become EMPTY_RESPONSE without mutating chunks or 
 test("the actual official pi-ai adapter owns zero-block errors; only whitespace stop needs xuxie", async () => {
   const entry = process.env.DSH_OFFICIAL_ROOT
     ? path.join(process.env.DSH_OFFICIAL_ROOT, "node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js")
-    : path.join(process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents/dsh"), "packages/llm/llm-pi-ai/lib/index.js");
+    : path.join(process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents", "dsh-official-0.2.1-alpha.4"), "packages/llm/llm-pi-ai/lib/index.js");
   const { PiAiAdapter } = await import(pathToFileURL(entry).href);
   for (const content of [[], [{ type: "text", text: " " }]]) {
     const model = { id: "fixture", provider: "mock", api: "openai-completions", input: ["text"], contextWindow: 1000 };

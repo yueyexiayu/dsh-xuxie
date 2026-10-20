@@ -8,7 +8,7 @@ let loaded;
 export function hostModules() {
   loaded ??= (async () => {
     const packageRoot = process.env.DSH_OFFICIAL_ROOT;
-    const root = process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents", "dsh");
+    const root = process.env.DSH_TEST_ROOT || path.join(os.homedir(), "Documents", "dsh-official-0.2.1-alpha.4");
     const packages = {
       cordis: "cordis", llm: "dsh-llm", session: "dsh-session", projections: "dsh-session-projection",
       systemPrompt: "dsh-system-prompt", tools: "dsh-tools", agents: "dsh-agent", agentLoop: "dsh-agent-loop",
