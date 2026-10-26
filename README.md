@@ -1,6 +1,32 @@
-# xuxie
+<div align="center">
+<img src="docs/repo-assets/hero.svg" width="100%" alt="空响应分工、有界续写和明确失败的原创示意，非运行日志截图" />
+<h1>xuxie · 不把沉默当答案</h1>
+<p><strong>处理正常结束却没有答案的输出，不替代任务完成判断。</strong></p>
+<p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+<p><a href="package.json">v0.2.2</a> · <a href="LICENSE">MIT</a> · DSH desktop plugin</p>
+<p><a href="#核心能力">核心能力</a> · <a href="#工作方式">工作方式</a> · <a href="#行为与边界">行为与边界</a> · <a href="#安装与配置">安装与配置</a> · <a href="#开发与验证">开发与验证</a></p>
+</div>
 
-DSH 插件：修复正常结束却没有答案的两类输出。真正的空输出交给官方模型请求重试；非空 reasoning、没有正文或工具调用时，在同一轮提醒模型继续。使用当前 Host 的官方扩展点，不修改 DSH 核心、模型选择或搜索插件。
+---
+
+复用当前 Host 的正式扩展点，不修改 DSH 核心、模型选择或搜索插件。空响应交给官方重试；reasoning-only 正常停止才在本轮有界提醒。**已有非空正文但任务未完，不由 xuxie 接管；持续目标应使用 Goal。**
+
+## 核心能力
+
+<table><tr>
+<td width="33%"><strong>🧩 官方重试分工</strong><br/><br/>不重复转换零内容块，仅对全空白块补充 EMPTY_RESPONSE。</td>
+<td width="33%"><strong>🔁 有界补答</strong><br/><br/>默认每轮最多2次实际入模提醒，其他继续输入优先。</td>
+<td width="33%"><strong>🧾 不伪装完成</strong><br/><br/>仍只有思考且配额耗尽时明确 XUXIE_NO_ANSWER，不正常结束。</td>
+</tr><tr>
+<td><strong>🎯 路由精确匹配</strong><br/><br/>默认主代理与指定提供方，排除子代理和标题/压缩辅助请求。</td>
+<td><strong>🛑 尊重停止边界</strong><br/><br/>取消、异常、工具调用、截断及本轮静默标记不额外催促。</td>
+<td><strong>🧠 轻量状态</strong><br/><br/>官方增量投影与按需重建，不扫描或持有全部历史思考。</td>
+</tr></table>
+
+## 工作方式
+
+![先按官方模型结果分类，再检查本轮资格与其他输入，有额度才追加提醒，否则明确失败。](docs/repo-assets/workflow.zh-CN.svg)
+
 
 ## 行为与边界
 
@@ -65,3 +91,14 @@ node --test test/*.test.mjs
 # 验证官方发行版，不使用旧 checkout：
 DSH_OFFICIAL_ROOT=/path/to/extracted-runtime node --test test/*.test.mjs
 ```
+
+<details>
+<summary><strong>为什么模型有正文，但任务没做完时不续写？</strong></summary>
+
+xuxie 负责缺失回答，不判断自然语言目标是否完成。已有非空正文后，持续执行应由 Goal 等机制负责；一次提醒也可能产生多次工具/模型调用，提醒配额不是总 token 预算。
+
+</details>
+
+**本次为文档更新：仅核对双语、图示、链接和排版，未重跑产品测试或重启 DSH。** [MIT License](LICENSE)。
+
+<div align="center"><sub>有边界地提醒，不无限循环。 · <a href="README.en.md">Read in English →</a></sub></div>
